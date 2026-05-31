@@ -1,1116 +1,695 @@
-# Jira CPU 验证风险分析 Skill
+# JIRA CPU 验证风险分析 Skill
 
-## 目的
+## 1. Skill 目标
 
-使用本 skill 分析 ASIC CPU 设计项目中的 Jira tickets，并输出面向验证负责人的项目健康度、RTL bug 趋势、验证就绪度、tapeout 风险以及跨团队闭环质量视图。
+本 Skill 用于分析 CPU 芯片设计开发项目中通过 JIRA 管理的 RTL 缺陷、验证任务、设计任务、风险项和投片阻塞项，帮助验证 leader、模块负责人、项目经理和技术主管快速掌握：
 
-本 skill 适用于 CPU 项目验证负责人、验证经理、DV lead 或质量 owner，用于回答以下问题：
+- 当前 CPU 项目的验证收敛状态；
+- RTL 缺陷的数量、趋势、严重程度和模块分布；
+- 高风险模块、高风险 owner、高风险里程碑；
+- 长期未关闭、反复 reopen、临近 tapeout 仍未解决的问题；
+- 验证活动是否真正释放风险，而不是只体现“跑了很多用例”；
+- 是否存在设计质量、验证质量、流程协同或风险闭环方面的系统性问题。
 
-- 项目是真的在向 tapeout 收敛，还是只是在关闭容易关闭的 bug？
-- 哪些 CPU 模块、特性或验证环境仍然存在高风险？
-- 关键 bug 是否被正确修复、验证，并通过回归手段防止复现？
-- bug reopen / reject / duplicate 模式是否暴露出 root cause 分析不足或验证 signoff 不充分？
-- 验证任务、覆盖率收敛、用例开发、formal 证明、emulation/prototype 任务和 debug 活动是否在一致推进？
-- 哪些 Jira items 需要管理层升级处理？
-
-输出必须基于证据。不要只做 ticket 数量统计摘要。
+本 Skill 的输出风格应面向 CPU 项目验证管理场景，结论要直接、分层、可行动，避免只给出普通 JIRA 统计报表。
 
 ---
 
-## 何时使用本 Skill
+## 2. 适用场景
 
-当用户要求分析 Jira issues、RTL bugs、验证任务、项目状态、bug 趋势、tapeout readiness、风险 dashboard、验证进展、CPU bug 质量、验证闭环或基于 Jira 的项目健康度时，使用本 skill。
+当用户提出以下需求时，使用本 Skill：
 
-典型用户请求：
-
-- “Analyze the Jira bugs for my CPU project and identify verification risks.”
-- “Give me a weekly verification status based on Jira.”
-- “Which modules are high-risk based on open RTL bugs?”
-- “Can you summarize blockers before tapeout?”
-- “Analyze reopen bugs and tell me what process problems they indicate.”
-- “Generate a verification leader dashboard from Jira tickets.”
-- “Review Jira bugs and identify whether verification closure is credible.”
+- 分析 JIRA 中的 RTL bug、defect、task、sub-task、risk、story 或 epic；
+- 根据 JIRA 导出的 CSV、Excel、JSON、API 结果或用户粘贴的表格数据判断项目风险；
+- 给验证 leader、模块 owner、项目管理层生成周报、月报、里程碑评审材料；
+- 分析某个 CPU 模块的 bug 收敛情况，例如 IFU、IDU、EXU、LSU、MMU、TLB、Cache、NoC、CHI、Debug、RAS、低功耗、DFT、CDC、Security、Virtualization 等；
+- 分析 tapeout 前是否存在验证风险、质量风险、交付风险；
+- 对 JIRA 数据做根因归类、风险评分、趋势分析和行动项建议。
 
 ---
 
-## 必需输入
+## 3. 输入数据要求
 
-至少收集或请求以下任意一种输入：
+### 3.1 推荐输入格式
 
-1. 通过可用 connector、MCP server、API token、CSV 导出、Excel 导出或粘贴的 issue 表格访问 Jira 数据。
-2. Jira project key 和 JQL 查询语句。
-3. Jira issue 导出数据，至少包含：
-   - Issue key
-   - Issue type
-   - Summary
-   - Status
-   - Priority 或 severity
-   - Component 或 module
-   - Assignee
-   - Reporter
-   - Created date
-   - Updated date
-   - Resolution date
-   - Fix version 或 milestone
-   - Labels
-   - Description
-   - Comments 或 activity history，如果可用
+优先支持以下输入：
 
-强烈建议额外包含以下字段：
+1. JIRA 导出的 CSV 或 Excel；
+2. JIRA REST API 返回的 JSON；
+3. 用户粘贴的问题单列表；
+4. 用户提供的 JQL 查询结果摘要；
+5. 按模块、状态、owner、severity 聚合后的统计表。
 
-- Root cause category
-- Bug source 或 detection method
-- Verification phase
-- Found by test / random / regression / formal / emulation / FPGA / silicon / code review
-- Escaped from previous phase
-- Affected CPU block
-- Affected feature
-- Reopen count
-- Linked issues
-- Blocking / blocked-by links
-- Testcase link
-- Commit link
-- Fix commit
-- Verification evidence link
-- Coverage item link
-- Waiver link
-- Owner team
-- Target tapeout milestone
-- Due date
-- Aging days
-- Last comment date
+### 3.2 推荐字段
 
-如果字段缺失，应谨慎地从 summary、description、labels、components 和 comments 中推断，并明确说明不确定性。
+如果可用，尽量读取或要求用户提供以下字段：
 
----
-
-## 期望的 Jira 分类体系
-
-如果项目使用一致的分类体系，本 skill 效果最好。如果分类体系不存在，应提出建议分类。
-
-### Issue Types
-
-常见 issue 类型：
-
-- RTL Bug
-- Design Bug
-- DV Bug
-- Verification Task
-- Coverage Task
-- Formal Task
-- Assertion Task
-- Scoreboard / Checker Task
-- Testcase Task
-- Regression Failure
-- Emulation / FPGA Task
-- Prototype Bug
-- Performance Bug
-- RAS / Safety Bug
-- Security Bug
-- Spec Issue
-- Waiver
-- Methodology / Infrastructure Task
-
-### CPU Block / Component
-
-推荐的 CPU component 字段或 label：
-
-- IFU
-- BPU
-- Fetch
-- Decode
-- Rename
-- Dispatch
-- Issue
-- Scheduler
-- ROB
-- EXU
-- ALU
-- MUL
-- DIV
-- FPU
-- SIMD
-- LSU
-- Load Queue
-- Store Queue
-- DCache
-- ICache
-- L2
-- MMU
-- TLB
-- Page Walk
-- Coherence
-- CHI / ACE / AXI
-- Interrupt / Exception
-- CSR / System Register
-- Debug / Trace
-- RAS
-- Power / Clock / Reset
-- Security / RME / Isolation
-- DFT / MBIST
-- Top-level Integration
-- Verification Environment
-- Regression Infrastructure
-
-### Verification Phase
-
-推荐的 phase label：
-
-- Architecture review
-- Microarchitecture review
-- Testplan
-- Unit test
-- Subsystem test
-- CPU top
-- SoC integration
-- Formal
-- Simulation regression
-- Emulation
-- FPGA prototype
-- Performance validation
-- Low power validation
-- RAS validation
-- Security validation
-- Gate-level simulation
-- Silicon validation
-
-### Bug Source / Detection Method
-
-推荐的 detection label：
-
-- Directed test
-- Random test
-- Stress test
-- Architectural test
-- ISA test
-- Formal property
-- Assertion
-- Checker
-- Scoreboard
-- Functional coverage
-- Code review
-- Spec review
-- Lint
-- CDC/RDC
-- Low-power check
-- Emulation
-- FPGA
-- Silicon
-- Customer scenario
-- Regression triage
-
-### Root Cause Category
-
-推荐的 root cause category：
-
-- Spec ambiguity
-- Spec mismatch
-- Microarchitecture corner case
-- RTL implementation error
-- FSM/state machine bug
-- Ordering bug
-- Coherency bug
-- Exception/flush/replay bug
-- Reset/power/clock bug
-- Timing/configuration dependency
-- Interface protocol bug
-- Testbench/model bug
-- Checker/scoreboard bug
-- Coverage hole
-- Missing test
-- Environment/configuration issue
-- Integration issue
-- Tool/script issue
-- Legacy bug
-- Incomplete fix
-- Duplicate/invalid
-
----
-
-## 数据收集流程
-
-### 1. 确定范围
-
-分析前，先识别：
-
-- Jira project key
-- CPU project name
-- Tapeout 或 milestone 名称
-- Date range
-- Scope 内的 blocks 或 components
-- Scope 内的 issue types
-- 是否包含 closed issues
-- 是否除 bugs 外还包含 verification tasks
-- 是否包含 DV infrastructure issues
-- 是否包含来自 emulation、FPGA 或 silicon validation 的 bugs
-
-如果用户没有指定范围，使用较宽的默认范围：
-
-```jql
-project = <PROJECT_KEY>
-AND issuetype in ("RTL Bug", "Design Bug", Bug, Task, Sub-task)
-AND created >= -180d
-ORDER BY priority DESC, updated DESC
-```
-
-### 2. 查询 Jira
-
-使用 JQL 获取相关 issues。优先先做宽查询，然后再细化。
-
-通用 bug 查询示例：
-
-```jql
-project = <PROJECT_KEY>
-AND issuetype in (Bug, "RTL Bug", "Design Bug")
-AND created >= -180d
-ORDER BY created DESC
-```
-
-open critical bug 查询示例：
-
-```jql
-project = <PROJECT_KEY>
-AND issuetype in (Bug, "RTL Bug", "Design Bug")
-AND statusCategory != Done
-AND priority in (Blocker, Critical, Highest, High)
-ORDER BY priority DESC, created ASC
-```
-
-verification task 查询示例：
-
-```jql
-project = <PROJECT_KEY>
-AND issuetype in (Task, Sub-task, "Verification Task", "Coverage Task", "Formal Task")
-AND statusCategory != Done
-ORDER BY due ASC, updated ASC
-```
-
-stale open issue 查询示例：
-
-```jql
-project = <PROJECT_KEY>
-AND statusCategory != Done
-AND updated <= -14d
-ORDER BY updated ASC
-```
-
-如果存在 reopen count 字段，reopen 相关查询示例：
-
-```jql
-project = <PROJECT_KEY>
-AND "Reopen Count" > 0
-ORDER BY "Reopen Count" DESC, updated DESC
-```
-
-如果 Jira 中没有 reopen-count 字段，在可用时检查 changelog/history。
-
-### 3. 获取详细信息
-
-对风险分析所需的每个 issue，获取：
-
-- Summary
-- Description
-- Status
-- Priority/severity
-- Labels/components
-- Fix version/milestone
-- Assignee/reporter
-- Created/updated/resolved dates
-- Linked issues
-- Comments
-- Changelog/history，如果可用
-- Attachments 或 links，如果相关
-- Test evidence、commit link、coverage link 或 waiver link，如果存在
-
-不要只依赖 issue summary。
-
-### 4. 数据归一化
-
-归一化 status、priority、component、phase 和 root cause。
-
-建议的归一化状态分组：
-
-| Normalized Status | Jira Status Examples |
+| 字段类别 | 推荐字段 |
 |---|---|
-| New/Open | Open, New, To Do, Backlog |
-| In Analysis | Triage, Analyzing, Need Info |
-| In Fix | In Progress, Fixing, Coding |
-| Fixed Pending DV | Fixed, Resolved, Ready for Verify |
-| In Verification | Verifying, In Review |
-| Closed | Closed, Done, Verified |
-| Rejected | Invalid, Won't Fix, Duplicate, Not a Bug |
+| 基本信息 | Key、Summary、Issue Type、Status、Resolution、Priority、Severity |
+| 责任信息 | Assignee、Reporter、Owner Team、Module Owner、Verifier、Designer |
+| 模块信息 | Component/s、Module、Sub-module、Block、Feature、Label |
+| 版本/里程碑 | Fix Version、Affects Version、Target Version、Milestone、Sprint、Tapeout Phase |
+| 时间信息 | Created、Updated、Resolved、Due Date、Status Change Time |
+| 缺陷属性 | Root Cause、Bug Category、Found Phase、Injection Phase、Detection Method |
+| 验证属性 | Test Name、Test Level、Coverage Item、Checker、Assertion、Regression、Random Seed |
+| 风险属性 | Blocker、Escalation、Linked Issues、Dependency、Customer Impact、Waiver |
+| 历史信息 | Changelog、Reopen Count、Status Transition、Comment History |
 
-建议的 severity 分组：
+### 3.3 字段缺失时的处理原则
 
-| Severity | Meaning |
-|---|---|
-| S0 Blocker | 阻塞重大验证、tapeout、boot 或架构正确性 |
-| S1 Critical | 功能正确性、数据破坏、死锁、安全、RAS 或一致性风险 |
-| S2 Major | 重要 feature failure 或高影响 corner case |
-| S3 Minor | 有 workaround 或功能影响较低的局部问题 |
-| S4 Cosmetic | 非功能问题或文档问题 |
-
----
-
-## 核心分析流程
-
-按以下顺序执行分析。
-
-### Step 1: 数据质量检查
-
-在给出结论前，先检查 Jira 数据是否可用于分析。
-
-需要报告：
-
-- 缺失 component/module 字段
-- 缺失 severity/priority
-- 缺失 fix version/milestone
-- 缺失 root cause
-- 缺失 verification evidence
-- 长时间没有更新的 stale tickets
-- 已关闭但没有 testcase 或 regression evidence 的 bugs
-- 状态与 comments 不一致的 bugs
-- ownership 不清晰的 tickets
-- 没有链接到 spec/testplan/commit 的 tickets
-
-将弱数据质量标记为一种验证管理风险。
-
-### Step 2: 整体 Bug 趋势
-
-分析：
-
-- 每周新增 bugs
-- 每周关闭 bugs
-- open bugs 净变化趋势
-- open critical bug 趋势
-- 按 severity 的关闭率
-- bug aging 的 median 和 P90
-- reopen 趋势
-- duplicate/invalid 趋势
-- fixed-pending-verification backlog
-
-解释指导：
-
-- open count 下降本身不够说明问题。
-- 检查 critical bugs 是否真的在关闭，而不是只关闭低严重级别 bugs。
-- 后期 S0/S1 bugs 增加，说明 design maturity 或 verification completeness 有风险。
-- “fixed pending verification” 队列增长，说明 DV bandwidth、regression 或 evidence 可能成为瓶颈。
-- 大量 rejected 或 duplicate issues，可能说明 triage 噪声大或 bug report 质量差。
-- 大量 reopened issues，可能说明 fix 不完整、root-cause 分析不足或 regression tests 不充分。
-
-### Step 3: Block / Feature 风险热力图
-
-按 CPU block、feature 和 owner team 对 issues 分组。
-
-对每个 block，计算：
-
-- Open S0/S1 bug count
-- Total open bug count
-- 最近 7/14/30 天新增 bugs
-- Average aging
-- P90 aging
-- Reopen count
-- Fixed pending verification count
-- Verification task backlog
-- Coverage task backlog
-- Formal task backlog
-- Unresolved blockers 数量
-- 在 integration/prototype/silicon phase 发现的未解决 bugs 数量
-
-风险解释：
-
-- open critical count 高：直接功能/tapeout 风险。
-- late-discovery rate 高：testplan 或早期验证阶段存在薄弱点。
-- reopen count 高：fix 质量差或缺少 regression。
-- stale count 高：ownership 或 triage 问题。
-- closed count 高但 evidence quality 低：存在 false closure 风险。
-- 复杂 block bug 数少不一定代表低风险；需要和 coverage 与 verification activity 交叉检查。
-
-### Step 4: 验证闭环证据审查
-
-对 resolved 或 closed bugs，检查闭环是否可信。
-
-高质量闭环应包含：
-
-- 清晰 root cause
-- Fix commit 或 RTL change link
-- Focused testcase 或 replay testcase
-- Regression evidence
-- 如适用，checker/assertion 更新
-- 如适用，coverage 更新
-- 如果 bug 暴露了遗漏场景，应更新 spec/testplan
-- Impact scope 说明
-- 确认已搜索类似场景
-- 确认没有 waiver 掩盖问题
-
-如果存在以下情况，应标记为弱闭环：
-
-- Status 是 Closed，但没有 verification evidence
-- Comment 只写 “fixed” 或 “verified”，没有 testcase/regression reference
-- 没有 root cause
-- 没有 fix link
-- 对 escaped bug 没有新增 regression
-- 没有 follow-up coverage owner
-- 关闭后又 reopen
-- 作为 duplicate 关闭，但 parent issue 未关闭或未验证
-
-### Step 5: 风险分类
-
-将每个风险项归入一个或多个类别。
-
-推荐风险类别：
-
-1. Functional correctness risk
-2. CPU architectural compliance risk
-3. Data corruption risk
-4. Deadlock/livelock/starvation risk
-5. Exception/interrupt/flush/replay ordering risk
-6. Memory ordering/coherency risk
-7. MMU/TLB/page-table risk
-8. RAS/safety diagnostic risk
-9. Security/isolation risk
-10. Power/reset/clock risk
-11. Performance risk
-12. Integration risk
-13. Verification environment risk
-14. Coverage closure risk
-15. Formal convergence/signoff risk
-16. Emulation/FPGA/prototype readiness risk
-17. Regression stability risk
-18. Process/ownership risk
-
-每个 risk 应包含：
-
-- Jira 中的证据
-- Impact
-- Likelihood
-- Current owner
-- Required action
-- Escalation recommendation
-- Confidence level
-
-### Step 6: 识别验证盲区
-
-不要只看 open bugs。
-
-潜在盲区信号：
-
-- 复杂 block bug 很少，同时 verification tasks 也很少
-- 最近没有来自 random stress tests 的 bugs
-- control-heavy logic 没有来自 formal/assertions 的 bugs
-- integration-heavy features 没有来自 emulation/prototype 的 bugs
-- 很多 bugs 是 integration 阶段发现，而不是 unit test 阶段发现
-- feature freeze 后仍发现大量 bugs
-- 同一个 block 反复出现相同 root cause
-- closed bugs 没有新增 coverage
-- waiver 数量高
-- coverage tasks 长期 stale
-- 大量 environment bugs 阻塞真实 RTL bug 发现
-- regression failures 经常被标记为 infrastructure，但没有 root-cause proof
-- bug description 提到 “corner case”，但没有新增 directed 或 random regression
-
-### Step 7: 升级清单
-
-创建一份需要管理层关注的简洁 ticket 列表。
-
-需要升级的问题包括：
-
-- S0/S1 且 open
-- 阻塞 regression、bring-up、emulation 或 prototype
-- 超过约定 SLA
-- 多次 reopened
-- Fixed 后长期未 verified
-- 缺少 owner
-- 缺少 closure evidence
-- 影响 architectural correctness、memory ordering、coherency、security、RAS 或 deadlock
-- 链接到多个下游 bugs
-- 导致反复 regression failures
-- 设计与验证团队之间存在争议
-- 依赖 spec clarification
-
-### Step 8: 推荐行动
-
-针对每个风险，推荐具体的验证动作，不要给泛泛建议。
-
-示例：
-
-- 为 exception priority corner case 增加 architectural directed test。
-- 增加 random stress constraint，覆盖 flush + replay + TLB invalidate overlap。
-- 为 valid/ready stability 增加 SVA protocol assertion。
-- 在 fairness assumptions 下增加 request eventually drains 的 formal liveness property。
-- 为 IC invalidate crossing outstanding fill 增加 coverage bin。
-- 为 same-address replay 下的 load-store ordering 增加 scoreboard check。
-- 增加 multi-core coherency + interrupt storm 的 emulation stress test。
-- 将 Jira ticket 拆分为 RTL fix、testcase、coverage 和 regression evidence subtasks。
-- 要求 design owner 提供 root cause 和 similar-case analysis。
-- 在关联 fix commit 和 regression evidence 前，阻止 closure。
-- 将 stale S1 bug 升级给 block owner 和 project lead。
+- 如果没有 `Severity`，用 `Priority`、标签、Summary 关键词和模块影响面推断风险等级，但必须注明“Severity 字段缺失，风险等级为推断结果”。
+- 如果没有 `Module`，尝试从 Component、Label、Summary、Epic、Fix Version 中推断模块。
+- 如果没有 `Resolved` 时间，只能分析打开时长和更新时间，不能精确分析关闭周期。
+- 如果没有 Changelog，不能精确统计每个状态停留时间，只能使用 Created、Updated、Resolved 粗略分析。
+- 如果没有 Root Cause，不要编造根因；可以根据 Summary、Description、Label、Comment 做“疑似根因”分类，并明确标注为推断。
 
 ---
 
-## 风险评分模型
+## 4. 分析总流程
 
-使用透明的风险评分。不要把评分当作绝对事实；评分用于排序和聚焦管理注意力。
+执行分析时，按以下流程处理。
 
-### Ticket-Level Risk Score
+### Step 1：理解项目背景和分析目标
 
-建议公式：
+先识别用户关心的是哪一类问题：
+
+- 项目整体验证状态；
+- 某个模块的缺陷风险；
+- 某个 milestone 或 tapeout 阶段的退出风险；
+- 某个 owner/team 的任务负载；
+- 新增 bug 趋势和收敛速度；
+- 高优先级 blocker；
+- JIRA 数据质量和流程问题；
+- 验证 leader 周报或评审报告。
+
+如果用户没有指定分析目标，默认从“验证状态 + 风险识别 + 行动建议”三个层次输出。
+
+### Step 2：字段标准化
+
+将不同 JIRA 项目中的字段映射到统一字段：
 
 ```text
-risk_score =
-  severity_weight
-+ age_weight
-+ reopen_weight
-+ late_phase_weight
-+ block_criticality_weight
-+ evidence_gap_weight
-+ dependency_weight
-+ trend_weight
+issue_key       = Key / Issue key / id
+issue_type      = Issue Type / Type
+summary         = Summary / Title
+status          = Status
+status_category = To Do / In Progress / Done
+priority        = Priority
+severity        = Severity / customfield_severity / Bug Severity
+module          = Component/s / Module / Block / Label
+assignee        = Assignee / Owner
+reporter        = Reporter
+created         = Created
+updated         = Updated
+resolved        = Resolved / Resolution Date
+fix_version     = Fix Version/s / Target Version / Milestone
+labels          = Labels
+root_cause      = Root Cause / Cause Category
+found_phase     = Found Phase / Detection Phase
+reopen_count    = Reopen Count / status transition back to Open
+links           = Linked Issues / Blocks / Is blocked by
 ```
 
-建议权重：
+字段名称不一致时，应优先保留原字段，并在报告中说明字段映射关系。
 
-| Factor | Condition | Weight |
-|---|---:|---:|
-| Severity | S0 | +50 |
-| Severity | S1 | +35 |
-| Severity | S2 | +20 |
-| Severity | S3 | +8 |
-| Age | open > 30 days | +15 |
-| Age | open > 14 days | +8 |
-| Reopen | each reopen | +10 |
-| Late phase | found in CPU top / SoC / emulation / FPGA / silicon | +15 |
-| Critical block | MMU, LSU, coherence, exception, security, RAS, reset/power | +10 |
-| Evidence gap | closed/resolved without verification evidence | +20 |
-| Dependency | blocks other issues or milestone | +15 |
-| Trend | same root cause appears repeatedly | +10 |
+### Step 3：数据质量检查
+
+先检查 JIRA 数据本身是否可信：
+
+- 是否存在大量缺失 Assignee 的问题单；
+- 是否存在大量没有 Component/Module 的 bug；
+- 是否存在 Severity/Priority 未填写；
+- 是否存在关闭但 Resolution 为空；
+- 是否存在更新时间很久以前但状态仍为 In Progress；
+- 是否存在相同 Summary 或相似 Summary 的重复单；
+- 是否存在任务被错误标记为 Done 但 comment 中仍有未解决事项；
+- 是否存在 target milestone 为空或 fixVersion 不一致；
+- 是否存在 bug 和 task 混用，导致统计口径失真。
+
+如果数据质量较差，必须先在结论中提示“JIRA 数据质量本身已构成管理风险”。
+
+### Step 4：基础统计
+
+至少统计以下指标：
+
+- 总问题单数量；
+- Open / In Progress / Resolved / Closed 数量和比例；
+- 新增 bug 数、关闭 bug 数、净增 bug 数；
+- 未关闭 bug backlog；
+- 按 Severity/Priority 分布；
+- 按模块分布；
+- 按 owner/team 分布；
+- 按 milestone/fixVersion 分布；
+- 平均打开时长、P50/P90/P95 打开时长；
+- 最近 7 天、14 天、30 天新增和关闭趋势；
+- Reopen 数量和 reopen rate；
+- Blocker/Critical 问题数量；
+- 临近 tapeout 未关闭问题数量。
+
+### Step 5：CPU 验证风险识别
+
+从 CPU 验证视角识别以下风险。
+
+#### 5.1 缺陷收敛风险
+
+重点关注：
+
+- 高等级 bug 未关闭；
+- 新增 bug 数持续高于关闭 bug 数；
+- P0/P1 bug 在 milestone 后期仍新增；
+- 同一模块在后期持续产生高等级 bug；
+- bug 修复后 reopen 率高；
+- 大量 bug 长期停留在 In Progress、Review、Ready for Verification；
+- 关闭速度依赖少数 owner，存在资源瓶颈。
+
+典型结论表达：
+
+> 当前缺陷 backlog 未呈现稳定下降趋势，且高等级 bug 在后期仍有新增，说明该模块仍处于功能/微架构不稳定状态，不建议将其视为 tapeout 风险已释放。
+
+#### 5.2 模块热点风险
+
+按 CPU 模块聚类，识别高风险模块：
+
+- IFU：取指顺序、自修改代码、I-cache invalidation、branch prediction、异常入口；
+- Decode/Dispatch：指令解码、非法指令、异常优先级、rename/dispatch backpressure；
+- OOO/ROB/Issue：年龄选择、flush、commit、exception、replay、starvation；
+- LSU：load/store ordering、store buffer、MMU interaction、TLBI、cacheability、atomic/exclusive；
+- MMU/TLB：page table walk、permission、ASID/VMID、TLBI、speculation、translation fault；
+- Cache/Coherence：MESI/MOESI、CHI/ACE、snoop、eviction、dirty data、barrier；
+- Interrupt/Exception：优先级、嵌套、精确异常、debug entry/exit；
+- Low Power：retention、power gating、reset sequence、clock gating、CDC/RDC；
+- RAS：error injection、parity/ECC、fault reporting、recovery、poison propagation；
+- Security/Virtualization：TrustZone/RME、stage-2 translation、permission isolation、side-effect；
+- DFT/Debug：scan、MBIST、debug access、halt/resume、trace；
+- SoC Interface：AXI/CHI/APB、QoS、deadlock、backpressure、ordering。
+
+如果某个模块同时满足“bug 数多 + 高等级 bug 多 + 长期未关闭 + reopen 多 + 后期仍新增”，应标记为 Top Risk Module。
+
+#### 5.3 验证充分性风险
+
+检查 JIRA 是否体现出有效的风险释放证据：
+
+- 是否只有大量 test/task，但缺少 bug root cause、coverage closure、checker/assertion 证据；
+- 是否有新增 directed/random/regression 用例对应到具体风险点；
+- 是否有 assertion、formal、scoreboard、reference model、coverage 的闭环记录；
+- 是否有复杂场景的 stress test，例如 flush + exception + TLBI + cache miss + backpressure；
+- 是否有跨模块问题的 owner 和 closure 证据；
+- 是否有 waiver，但缺少影响分析和签核；
+- 是否存在 bug 已关闭但没有验证回归证据。
+
+结论应区分：
+
+- “用例执行量充分”；
+- “覆盖率达到目标”；
+- “关键风险点已有证据释放”；
+- “缺陷趋势已经收敛”。
+
+不要把前三者混为一谈。
+
+#### 5.4 设计稳定性风险
+
+识别以下信号：
+
+- 同一模块持续有新 bug；
+- 同一 root cause 反复出现；
+- spec unclear / design change / late ECO 类问题比例高；
+- 修复一个 bug 引入多个新 bug；
+- reopen 多，说明修复质量或验证确认不足；
+- 多个模块被同一个架构变更影响；
+- milestone 后期仍有大量 design task 未关闭。
+
+#### 5.5 流程协同风险
+
+识别以下信号：
+
+- bug 长期停留在 Waiting for Design / Waiting for Verification；
+- verification owner 和 design owner 责任不清；
+- blocker 链接关系混乱；
+- comment 中有争议但状态被关闭；
+- 缺少明确的 next action、owner、due date；
+- 关键 bug 没有升级记录；
+- 模块之间互相阻塞，缺少项目级协调。
+
+---
+
+## 5. 风险评分模型
+
+对每个问题单计算风险分，默认 0–100 分。可以根据项目习惯调整权重。
+
+### 5.1 单个问题单风险分
+
+```text
+IssueRiskScore =
+  SeverityWeight
++ StatusWeight
++ AgingWeight
++ MilestoneWeight
++ ReopenWeight
++ ModuleCriticalityWeight
++ BlockerWeight
++ VerificationEvidenceWeight
++ CustomerImpactWeight
+```
+
+推荐权重：
+
+| 因子 | 规则 | 分值 |
+|---|---|---:|
+| Severity | Blocker/Critical/P0 | +25 |
+| Severity | Major/High/P1 | +18 |
+| Severity | Medium/P2 | +10 |
+| Status | Open / In Progress / Reopened | +15 |
+| Status | Ready for Verification | +8 |
+| Aging | 打开超过 30 天 | +8 |
+| Aging | 打开超过 60 天 | +15 |
+| Milestone | 目标版本为当前 tapeout/milestone | +15 |
+| Reopen | reopen >= 1 | +8 |
+| Reopen | reopen >= 2 | +15 |
+| Module Criticality | MMU/LSU/Cache/Coherence/OOO/RAS/Security 等关键模块 | +10 |
+| Blocker | blocks 其他 issue 或被标记 blocker | +15 |
+| Verification Evidence | 缺少回归/覆盖/assertion/formal 证据 | +10 |
+| Customer Impact | 影响架构正确性、数据一致性、安全、RAS 或死锁 | +15 |
 
 风险等级：
 
-| Score | Level |
-|---:|---|
-| >= 70 | Red |
-| 40-69 | Amber |
-| < 40 | Green |
+| 分数 | 风险等级 | 处理建议 |
+|---:|---|---|
+| >= 70 | Red | 必须项目级跟踪，明确 owner、due date、验证证据和退出标准 |
+| 45–69 | Amber | 模块负责人跟踪，要求下个周期给出闭环计划 |
+| 20–44 | Yellow | 常规跟踪，但需要确认不影响 milestone |
+| < 20 | Green | 低风险，按常规流程处理 |
 
-### Block-Level Risk Score
-
-对每个 block：
+### 5.2 模块风险分
 
 ```text
-block_risk =
-  5 * open_S0
-+ 3 * open_S1
-+ 2 * open_S2
-+ 2 * reopened_bugs
-+ 2 * stale_open_bugs
-+ 2 * fixed_pending_verification
-+ 2 * late_found_bugs
-+ 1 * open_verification_tasks
-+ 1 * evidence_gap_closed_bugs
-- 1 * high_quality_recent_closures
+ModuleRiskScore =
+  0.30 * HighSeverityOpenRatio
++ 0.20 * OpenBacklogTrend
++ 0.15 * AgingRisk
++ 0.15 * ReopenRate
++ 0.10 * LateBugArrivalRate
++ 0.10 * VerificationEvidenceGap
 ```
 
-需要结合工程判断解释。复杂 block 如果 bug 数低但验证活动也低，不应自动判断为 Green。
+输出时不要只按 bug 数排序。模块 bug 数多不一定风险最高；后期新增高等级 bug、长期不关闭、reopen 多、缺少验证证据的模块风险更高。
 
 ---
 
-## 输出格式
+## 6. 推荐 JQL 模板
 
-根据用户请求选择对应输出格式。
+以下 JQL 需要根据项目实际字段名调整。
 
-### 1. Executive Verification Status
-
-用于经理级状态汇报。
-
-```markdown
-# CPU Verification Jira Risk Summary
-
-## Overall Status
-
-- Overall risk: Red / Amber / Green
-- Main conclusion: <one-sentence conclusion>
-- Tapeout readiness concern: <yes/no/conditional>
-- Data quality confidence: High / Medium / Low
-
-## Key Metrics
-
-| Metric | Value | Interpretation |
-|---|---:|---|
-| Total open bugs |  |  |
-| Open S0/S1 bugs |  |  |
-| New bugs in last 7 days |  |  |
-| Closed bugs in last 7 days |  |  |
-| Fixed pending verification |  |  |
-| Reopened bugs |  |  |
-| Stale open bugs >14 days |  |  |
-| Closed bugs without evidence |  |  |
-
-## Top Risks
-
-| Rank | Risk | Evidence | Impact | Owner | Action |
-|---:|---|---|---|---|---|
-| 1 |  |  |  |  |  |
-| 2 |  |  |  |  |  |
-| 3 |  |  |  |  |  |
-
-## Block Heatmap
-
-| Block | Open Critical | Aging | Reopen | Evidence Quality | Risk | Comment |
-|---|---:|---:|---:|---|---|---|
-| LSU/MMU |  |  |  |  | Red/Amber/Green |  |
-| IFU/BPU |  |  |  |  | Red/Amber/Green |  |
-| ROB/Issue |  |  |  |  | Red/Amber/Green |  |
-
-## Required Management Actions
-
-1. <action>
-2. <action>
-3. <action>
-```
-
-### 2. Weekly Verification Leader Report
-
-```markdown
-# Weekly Jira-Based CPU Verification Status
-
-## This Week's Signal
-
-- New issues:
-- Closed issues:
-- Net open change:
-- New S0/S1:
-- S0/S1 closed:
-- Main risk movement:
-
-## What Improved
-
-- <evidence-based improvement>
-
-## What Got Worse
-
-- <evidence-based deterioration>
-
-## Open Critical Items
-
-| Issue | Block | Severity | Age | Status | Risk | Next Action |
-|---|---|---|---:|---|---|---|
-
-## Verification Closure Quality
-
-| Area | Observation | Risk | Required Action |
-|---|---|---|---|
-
-## Next-Week Focus
-
-1. <specific target>
-2. <specific target>
-3. <specific target>
-```
-
-### 3. Ticket-Level Risk Table
-
-```markdown
-| Issue | Summary | Block | Severity | Status | Age | Risk Level | Why Risky | Recommended Action |
-|---|---|---|---|---|---:|---|---|---|
-```
-
-### 4. Root-Cause and Escape Analysis
-
-```markdown
-# Root-Cause Pattern Analysis
-
-## Dominant Root Causes
-
-| Root Cause | Count | Blocks | Late Found? | Interpretation |
-|---|---:|---|---|---|
-
-## Escaped Bugs
-
-| Issue | Found Phase | Should Have Been Found In | Escape Reason | Prevention |
-|---|---|---|---|---|
-
-## Verification Methodology Improvements
-
-1. <methodology action>
-2. <test/checker/formal/coverage action>
-3. <process action>
-```
-
-### 5. Tapeout Readiness Gate Review
-
-```markdown
-# Jira Evidence Review for Tapeout Readiness
-
-## Gate Result
-
-- Gate recommendation: Pass / Conditional Pass / Fail
-- Reason:
-
-## Blocking Conditions
-
-| Condition | Evidence | Required Closure |
-|---|---|---|
-
-## Conditional Pass Items
-
-| Item | Risk | Required Mitigation | Owner | Deadline |
-|---|---|---|---|---|
-
-## Evidence Gaps
-
-| Area | Missing Evidence | Risk | Action |
-|---|---|---|---|
-
-## Final Recommendation
-
-<clear recommendation with rationale>
-```
-
----
-
-## CPU 验证分析启发式规则
-
-应用 CPU-specific 判断。不要把所有 bugs 等同看待。
-
-### 高风险 CPU Bug 主题
-
-优先关注与以下内容相关的 bugs：
-
-- Architectural state corruption
-- Wrong instruction retirement
-- Exception priority 或 precise exception violation
-- Interrupt delivery 或 masking
-- Flush/replay interaction
-- Speculation side effects
-- Load-store ordering
-- Same-address load/store hazard
-- MMU/TLB invalidation
-- Page-table permission 和 attribute checks
-- I-cache/D-cache coherency
-- Multi-core coherence
-- Deadlock/livelock/starvation
-- RAS error logging 或 containment
-- Security/isolation boundaries
-- Debug/trace architectural visibility
-- Reset/power domain crossing
-- Clock gating 和 enable sequencing
-- Performance counters，如果用于 architecture-visible behavior
-- External protocol violations，例如 AXI/CHI ordering 或 response rules
-
-### 验证流程异味
-
-将以下模式标记为 process risk：
-
-- bugs 反复在没有 testcase links 的情况下关闭
-- bug comments 显示 design 与 verification 之间存在分歧
-- critical bugs 没有 owner 或 owner 错误
-- 老 bugs 被移动到未来 milestone，但没有 documented risk acceptance
-- 大量 bugs 被标记为 duplicate，但 parent issue 没有 closure evidence
-- Regression failures 反复被 waiver 成 “environment issue”
-- 同样 root cause 跨项目或跨 CPU 代际反复出现
-- 声称 coverage closure 后仍发现新的 critical bugs
-- 大量 prototype/silicon bugs 本应在 simulation/formal 中发现
-- verification tasks 晚于 RTL fixes 关闭
-- coverage tasks 没有链接到 bug root causes
-- formal tasks 以 “inconclusive” 关闭，但没有 residual-risk statement
-
----
-
-## 推荐 JQL 查询库
-
-将 `<PROJECT_KEY>`、`<MILESTONE>` 和字段名替换为项目实际值。
-
-### All active CPU verification bugs
+### 6.1 当前未关闭高风险 bug
 
 ```jql
 project = <PROJECT_KEY>
-AND issuetype in (Bug, "RTL Bug", "Design Bug")
-AND statusCategory != Done
-ORDER BY priority DESC, created ASC
-```
-
-### Open critical bugs
-
-```jql
-project = <PROJECT_KEY>
-AND issuetype in (Bug, "RTL Bug", "Design Bug")
+AND issuetype in (Bug, Defect)
 AND statusCategory != Done
 AND priority in (Blocker, Critical, Highest, High)
-ORDER BY priority DESC, created ASC
+ORDER BY priority DESC, updated ASC
 ```
 
-### Bugs fixed but not verified
-
-```jql
-project = <PROJECT_KEY>
-AND issuetype in (Bug, "RTL Bug", "Design Bug")
-AND status in ("Fixed", "Resolved", "Ready for Verify", "Pending Verification")
-ORDER BY updated ASC
-```
-
-### Stale open bugs
-
-```jql
-project = <PROJECT_KEY>
-AND statusCategory != Done
-AND updated <= -14d
-ORDER BY updated ASC
-```
-
-### Recently created bugs
-
-```jql
-project = <PROJECT_KEY>
-AND issuetype in (Bug, "RTL Bug", "Design Bug")
-AND created >= -7d
-ORDER BY created DESC
-```
-
-### Recently closed bugs
-
-```jql
-project = <PROJECT_KEY>
-AND issuetype in (Bug, "RTL Bug", "Design Bug")
-AND statusCategory = Done
-AND resolved >= -7d
-ORDER BY resolved DESC
-```
-
-### Bugs by milestone
+### 6.2 当前 milestone 未关闭问题
 
 ```jql
 project = <PROJECT_KEY>
 AND fixVersion = <MILESTONE>
-AND issuetype in (Bug, "RTL Bug", "Design Bug")
-ORDER BY priority DESC, status ASC
-```
-
-### Verification tasks not done
-
-```jql
-project = <PROJECT_KEY>
-AND issuetype in (Task, Sub-task, "Verification Task", "Coverage Task", "Formal Task")
 AND statusCategory != Done
-ORDER BY priority DESC, due ASC
+ORDER BY priority DESC, created ASC
 ```
 
-### Regression-related tickets
+### 6.3 长期未更新问题
 
 ```jql
 project = <PROJECT_KEY>
-AND (
-  labels in (regression, nightly, failure)
-  OR summary ~ "regression"
-  OR description ~ "regression"
-)
+AND statusCategory != Done
+AND updated <= -14d
+ORDER BY updated ASC
+```
+
+### 6.4 后期新增高等级 bug
+
+```jql
+project = <PROJECT_KEY>
+AND issuetype in (Bug, Defect)
+AND created >= <DATE>
+AND priority in (Blocker, Critical, Highest, High)
+ORDER BY created DESC
+```
+
+### 6.5 某模块未关闭 bug
+
+```jql
+project = <PROJECT_KEY>
+AND issuetype in (Bug, Defect)
+AND component = <MODULE_NAME>
+AND statusCategory != Done
+ORDER BY priority DESC, created ASC
+```
+
+### 6.6 Reopened 问题
+
+```jql
+project = <PROJECT_KEY>
+AND status changed TO Reopened
 ORDER BY updated DESC
 ```
 
-### Formal verification tasks
+### 6.7 未分配 owner 的问题
 
 ```jql
 project = <PROJECT_KEY>
-AND (
-  labels in (formal, fpv, sva, assertion)
-  OR summary ~ "formal"
-  OR summary ~ "assertion"
-)
-ORDER BY status ASC, updated DESC
+AND statusCategory != Done
+AND assignee is EMPTY
+ORDER BY priority DESC, created ASC
 ```
 
-### Emulation / FPGA / prototype tickets
+### 6.8 Blocker/依赖问题
 
 ```jql
 project = <PROJECT_KEY>
-AND (
-  labels in (emulation, fpga, prototype)
-  OR summary ~ "emulation"
-  OR summary ~ "FPGA"
-  OR summary ~ "prototype"
-)
-ORDER BY priority DESC, updated DESC
+AND statusCategory != Done
+AND (priority in (Blocker, Critical) OR labels in (blocker, tapeout_blocker, risk))
+ORDER BY priority DESC, updated ASC
 ```
 
 ---
 
-## 证据提取规则
+## 7. 分析输出模板
 
-阅读 ticket 文本和 comments 时，提取以下信息。
+输出报告应包含以下结构。
 
-### Extracted Fields
-
-```yaml
-issue_key:
-summary:
-issue_type:
-status:
-priority:
-severity:
-component:
-subsystem:
-owner:
-reporter:
-created:
-updated:
-resolved:
-age_days:
-fix_version:
-milestone:
-labels:
-found_phase:
-detection_method:
-root_cause:
-impact:
-linked_issues:
-blocking_status:
-has_fix_commit:
-has_testcase:
-has_regression_evidence:
-has_coverage_update:
-has_formal_property_update:
-has_spec_update:
-has_waiver:
-reopen_count:
-risk_category:
-risk_score:
-risk_level:
-recommended_action:
-confidence:
-```
-
-### Root-Cause Extraction
-
-如果 root cause 没有显式标注，则从措辞中推断：
-
-- “flush”, “replay”, “exception”, “retire”, “commit” → ordering/precise-state risk
-- “TLB”, “page”, “permission”, “attribute”, “ASID”, “VMID” → MMU/TLB risk
-- “snoop”, “coherent”, “shareable”, “invalidate”, “ownership” → coherence risk
-- “valid/ready”, “response”, “ID”, “ordering” → interface protocol risk
-- “deadlock”, “hang”, “no forward progress” → liveness risk
-- “X”, “reset”, “clock gate”, “power” → reset/power/X-propagation risk
-- “RAS”, “SError”, “poison”, “ECC”, “parity” → RAS/safety risk
-- “secure”, “realm”, “permission”, “isolation” → security risk
-- “coverage”, “checker”, “scoreboard”, “env” → verification environment 或 closure risk
-
-始终区分显式字段数据与推断分类。
-
----
-
-## 输出风格指南
-
-使用验证负责人风格：
-
-- 清晰、基于证据、面向风险。
-- 优先表达 “risk and action”，而不是泛泛总结。
-- 突出 blockers 和 weak evidence。
-- 不要仅基于 closed-ticket count 得出乐观结论。
-- 当 Jira 字段不完整时，不要夸大置信度。
-- dashboard 使用简洁表格。
-- 只有在技术细节会改变风险判断时，才展开技术细节。
-
-推荐措辞：
-
-- “This is a closure-evidence risk, not only a bug-count risk.”
-- “The LSU/MMU area remains Amber because the open critical count is small, but recent bugs were found late and closure evidence is weak.”
-- “The fixed-pending-verification backlog suggests DV bandwidth or regression stability is now the bottleneck.”
-- “The reopen pattern points to incomplete root cause analysis rather than isolated implementation mistakes.”
-
-避免：
-
-- “Project looks good because many bugs are closed.”
-- “No bugs means no risk.”
-- “Closed means verified.”
-- “Low priority means safe.”
-- “Jira data proves tapeout readiness.”
-
----
-
-## 最终回答检查清单
-
-回答用户前，确认答案包含：
-
-- Overall risk status
-- Key Jira metrics
-- Trend interpretation
-- High-risk blocks/features
-- Open critical tickets or categories
-- Stale/reopened/fixed-pending-verification issues
-- Evidence quality assessment
-- Escalation list
-- Concrete recommended actions
-- Data limitations and confidence level
-
-如果输入数据不完整，包含以下内容：
+### 7.1 一页管理层摘要
 
 ```markdown
-## Data Limitations
+# JIRA 验证状态与风险分析摘要
 
-The Jira data is incomplete in the following ways:
-- <missing field or missing evidence>
-- <missing field or missing evidence>
+## 总体结论
+- 当前项目状态：Green / Yellow / Amber / Red
+- 主要风险判断：...
+- 是否建议通过当前 milestone：建议通过 / 有条件通过 / 不建议通过
 
-Therefore, the risk assessment confidence is <High/Medium/Low>.
+## 关键数据
+- 总问题单：N
+- 未关闭问题：N，占比 X%
+- P0/P1 未关闭：N
+- 最近 7/14/30 天新增 bug：N / N / N
+- 最近 7/14/30 天关闭 bug：N / N / N
+- Reopen 数量：N
+- 超过 30 天未关闭：N
+
+## Top 5 风险模块
+1. <Module A>：风险原因...
+2. <Module B>：风险原因...
+
+## Top 5 必须升级问题
+1. <JIRA-KEY>：原因、owner、建议动作
+2. <JIRA-KEY>：原因、owner、建议动作
+
+## 下个周期建议动作
+- 动作 1：owner / due date / exit criteria
+- 动作 2：owner / due date / exit criteria
 ```
 
----
-
-## 面向用户的示例回答骨架
+### 7.2 验证 leader 视角详细报告
 
 ```markdown
-Based on the Jira tickets provided, I would not judge verification status only by total open/closed count. The main risk signal is the combination of critical open bugs, fixed-but-not-verified backlog, reopen rate, stale ownership, and lack of closure evidence.
+# CPU 项目 JIRA 缺陷与验证风险分析报告
 
-## Executive Summary
+## 1. 分析范围
+- 项目：...
+- 时间范围：...
+- JIRA 查询条件或数据来源：...
+- 纳入 issue 类型：...
+- 主要字段：...
+- 数据质量限制：...
 
-Overall risk: Amber
+## 2. 总体缺陷收敛状态
+- 缺陷总量与状态分布
+- 新增/关闭趋势
+- Backlog 趋势
+- 高等级 bug 收敛情况
+- 结论：...
 
-The project appears to be functionally converging, but verification closure is not yet strong enough for a clean tapeout recommendation because several high-impact bugs are fixed but not verified, and closure evidence is missing for multiple CPU-memory-system issues.
+## 3. 模块风险分析
+| 模块 | Open Bug | P0/P1 Open | Aging Bug | Reopen | 后期新增 | 风险等级 | 主要风险 |
+|---|---:|---:|---:|---:|---:|---|---|
+| LSU/MMU | ... | ... | ... | ... | ... | Red | ... |
 
-## Top Verification Risks
+## 4. 高风险问题单清单
+| Key | Summary | Module | Severity | Status | Age | Owner | Risk | 建议动作 |
+|---|---|---|---|---|---:|---|---|---|
 
-| Risk | Evidence | Impact | Action |
-|---|---|---|---|
-| Fixed-pending-verification backlog | 12 bugs fixed but not verified, 5 older than 14 days | RTL fixes may not be regression-proven | Allocate DV owner and require testcase/regression links |
-| LSU/MMU late bugs | Recent S1 bugs found at CPU-top | Unit-level testplan may have blind spots | Add focused random stress and formal checks |
-| Weak closure evidence | 18 closed bugs lack testcase links | False closure risk | Block future closure without evidence |
+## 5. 验证充分性和风险释放证据
+- 已有证据：...
+- 缺失证据：...
+- 需要补充的 regression/formal/assertion/coverage：...
 
-## Recommended Management Actions
+## 6. 流程和协同风险
+- Owner 缺失：...
+- 状态长期停滞：...
+- 跨模块依赖：...
+- 关闭标准不一致：...
 
-1. Treat S0/S1 fixed-pending-verification as tapeout blockers until regression evidence is attached.
-2. Run a focused escape analysis for late LSU/MMU and coherency bugs.
-3. Require each reopened bug to include root cause, similar-case search, and regression prevention.
-4. Build a block-level risk dashboard combining bug trend, coverage gaps, and closure evidence.
+## 7. 行动项建议
+| 优先级 | 动作 | Owner | Due Date | Exit Criteria |
+|---|---|---|---|---|
 ```
 
 ---
 
-## 可选自动化思路
+## 8. CPU 项目专用风险规则
 
-如果具备 Jira API 访问能力，可以自动化以下内容：
+### 8.1 Tapeout 前 Red Flag
 
-1. Daily open critical bug digest.
-2. Weekly verification risk dashboard.
-3. Stale ticket escalation.
-4. Fixed-pending-verification queue report.
-5. Reopened bug root-cause review.
-6. Closed-without-evidence audit.
-7. Block heatmap generation.
-8. Tapeout readiness gate report.
-9. 从 UT 到 CPU-top/prototype/silicon 的 bug escape analysis。
-10. Regression failure trend analysis.
+如果出现以下情况，应标记为 Red Flag：
+
+- 当前 milestone 仍有未关闭 P0/P1 bug；
+- 最近两周仍持续新增 P0/P1 bug；
+- MMU/LSU/Cache/Coherence/OOO/RAS/Security 模块存在未解释清楚的高等级 bug；
+- 存在 deadlock、data corruption、security violation、precise exception violation、memory ordering violation、cache coherency violation；
+- bug 关闭但缺少 regression seed、test name、checker、coverage 或 formal 证据；
+- 大量 bug 处于 Ready for Verification，但验证侧没有明确回归计划；
+- 关键模块 bug reopen 率高于 10%；
+- 同一 root cause 跨多个模块重复出现；
+- waiver 数量多且缺少签核或影响分析；
+- 关键 feature 的 JIRA task 已关闭，但 coverage/plan/issue link 无法证明风险释放。
+
+### 8.2 CPU 高危关键词
+
+分析 Summary、Description、Comment、Labels 时，重点关注以下关键词：
+
+```text
+deadlock, hang, starvation, livelock, timeout,
+data corruption, wrong data, mismatch, ordering,
+exception, interrupt, precise, priority,
+flush, replay, rollback, commit, retire,
+TLB, TLBI, MMU, PTW, ASID, VMID, page fault,
+cache, snoop, coherence, dirty, eviction, invalidate,
+atomic, exclusive, barrier, fence,
+RAS, ECC, parity, poison, error injection,
+security, permission, isolation, realm, secure, non-secure,
+low power, retention, reset, clock gating, power gating,
+CDC, RDC, glitch, X-propagation,
+DFT, scan, MBIST, debug, trace
+```
+
+出现这些关键词的问题单，即使 Severity/Priority 不高，也应检查是否存在低估风险。
 
 ---
 
-## Tool Integration 注意事项
+## 9. 输出风格要求
 
-如果使用 Jira Cloud REST API 或 Jira MCP server：
+### 9.1 结论要管理化
 
-- 优先使用 JQL 进行初始 issue retrieval。
-- 对大型项目使用 pagination。
-- 尽可能只请求分析所需字段。
-- 当需要分析 reopen count、status transitions 或 aging 时，获取 changelog/history。
-- 当需要分析 closure evidence 和 root cause quality 时，获取 comments。
-- 构造复杂 JQL 前，先解析 custom field names。
-- 由于项目特定字段名和允许值会变化，需要在 Jira instance 中验证生成的 JQL。
-- 永远不要在输出中暴露 API tokens 或 credentials。
-- 如果项目保密性重要，应谨慎总结敏感 ticket 内容。
+不要只输出：
+
+> LSU 有 35 个 bug，MMU 有 22 个 bug。
+
+应输出：
+
+> LSU 是当前最高风险模块。虽然 bug 总数不是最高，但 P1 未关闭数、后期新增数和 reopen 数同时偏高，并且问题集中在 load/store ordering、TLBI interaction 和 replay/flush 场景，说明该模块仍存在架构级风险释放不足的问题。建议将 LSU 设为下个周期项目级专项收敛对象。
+
+### 9.2 建议要可执行
+
+每条建议尽量包含：
+
+- 具体问题；
+- 责任 owner；
+- 截止时间；
+- 退出标准；
+- 需要补充的验证证据。
+
+示例：
+
+```markdown
+建议将 JIRA-1234/JIRA-1256/JIRA-1290 合并为 LSU TLBI + flush 风险专项，由 LSU design owner 和 MMU verification owner 联合闭环。退出标准包括：
+1. 所有关联 bug 关闭且无 reopen；
+2. 增加 directed test 覆盖 TLBI 与 outstanding transaction 并发；
+3. regression 连续 3 轮无失败；
+4. 增加 SVA/scoreboard 检查 stale translation 不可被使用；
+5. 覆盖率点 tlbi_flush_overlap 达到目标。
+```
+
+### 9.3 明确不确定性
+
+如果数据不足，应明确说明：
+
+- 哪些结论是基于字段直接统计；
+- 哪些结论是基于文本关键词推断；
+- 哪些结论因为缺少 changelog、root cause、coverage link 而无法确认；
+- 需要用户补充哪些字段才能进一步分析。
+
+---
+
+## 10. 可选深度分析
+
+当数据足够时，进一步做以下分析。
+
+### 10.1 缺陷趋势分析
+
+- 每周新增 bug；
+- 每周关闭 bug；
+- 净增 bug；
+- 累积 open backlog；
+- 高等级 bug 趋势；
+- 后期 bug arrival rate。
+
+判断标准：
+
+- 如果新增曲线下降且关闭曲线稳定高于新增曲线，说明缺陷正在收敛；
+- 如果新增曲线在 milestone 后期反弹，说明验证深水区仍在暴露新问题；
+- 如果关闭曲线很高但 reopen 也很高，说明关闭质量存疑。
+
+### 10.2 Root Cause 分析
+
+建议分类：
+
+| Root Cause | 含义 |
+|---|---|
+| Spec unclear | 规格不清或规格变更 |
+| RTL logic bug | RTL 实现错误 |
+| Micro-architecture gap | 微架构方案缺陷 |
+| Verification env bug | 验证环境问题 |
+| Test issue | 用例错误或约束错误 |
+| Checker/model issue | checker、scoreboard、reference model 问题 |
+| Integration issue | 集成、配置、接口连接问题 |
+| Low power/reset issue | 低功耗、reset、clock gating 问题 |
+| CDC/RDC issue | 跨时钟/跨复位问题 |
+| Tool/IP issue | EDA 工具或第三方 IP 问题 |
+
+### 10.3 验证方法有效性分析
+
+按 Detection Method 统计：
+
+- directed test；
+- random regression；
+- formal/SVA；
+- emulation/FPGA/prototype；
+- code review；
+- architecture review；
+- static/lint/CDC；
+- post-silicon feedback。
+
+重点判断：
+
+- 哪些类型 bug 主要靠随机回归发现；
+- 哪些高危 bug 应前移到 formal/assertion/static；
+- 是否存在“后期才由 prototype 或 silicon-like 场景发现”的前端验证缺口。
+
+---
+
+## 11. 与用户交互策略
+
+### 11.1 数据足够时
+
+直接分析，不要反复追问。即使字段不全，也先给出基于当前数据的初步结论，并列出需要补充的数据。
+
+### 11.2 数据不足时
+
+可以请用户补充以下最小字段：
+
+```text
+Key, Summary, Issue Type, Status, Priority/Severity, Assignee,
+Component/Module, Created, Updated, Resolved, Fix Version/Milestone, Labels
+```
+
+如果用户只提供部分字段，也要尽力完成分析。
+
+### 11.3 用户要求生成报告时
+
+优先输出中文报告，适合直接放入项目周报、质量复盘、milestone review 或 tapeout readiness review。
+
+---
+
+## 12. 默认输出检查清单
+
+每次分析完成前，检查是否已经回答以下问题：
+
+- 当前项目验证状态是 Green、Yellow、Amber 还是 Red？
+- 最大的 3 个风险是什么？
+- 哪些模块最危险，为什么？
+- 哪些问题单必须升级跟踪？
+- 哪些 bug 长期未关闭或长期未更新？
+- 是否存在 reopen 高、关闭质量差的问题？
+- 是否存在 owner/模块/里程碑信息缺失导致的管理风险？
+- 是否能证明关键风险已通过 regression、coverage、assertion、formal、prototype 等手段释放？
+- 下个周期最应该做的 3–5 个行动项是什么？
+
+---
+
+## 13. 示例输出片段
+
+```markdown
+## 总体判断
+
+当前项目验证状态评估为 Amber，主要原因不是 open bug 总量过高，而是高等级问题集中在 LSU/MMU/Cache 这类架构关键模块，并且最近两周仍有 P1 bug 新增。虽然关闭数量上升，但 reopen 率偏高，说明修复质量和验证确认流程仍不稳定。
+
+## Top 风险
+
+1. LSU/MMU 交互风险：多个问题集中在 TLBI、outstanding transaction、flush/replay 场景，属于架构正确性风险。
+2. Cache/Coherence 收敛风险：后期仍有 ordering/coherence 相关 bug 新增，建议增加协议级 checker 和压力回归。
+3. 流程风险：多个高等级 bug 缺少明确 verification evidence，关闭标准不一致。
+
+## 建议行动
+
+- 将 LSU/MMU 相关 bug 建立专项 risk epic，统一跟踪 root cause、修复方案和验证证据。
+- 对所有 P0/P1 关闭单补充 regression seed、test name、checker/coverage link。
+- 对 reopen >= 2 的问题进行设计负责人和验证负责人联合复盘。
+```
+
+---
+
+## 14. 安全和保密要求
+
+- 不要在报告中泄露 JIRA token、用户账号、内部服务器地址或未脱敏客户信息。
+- 如果用户提供的是内部项目数据，输出时尽量使用模块名、问题单号和风险描述，不扩散敏感实现细节。
+- 对外部汇报版本应自动建议脱敏：项目代号、人员姓名、内部 IP 名称、客户名称、具体漏洞细节。
+
+---
+
+## 15. Skill 使用方式建议
+
+用户可以这样调用本 Skill：
+
+```text
+请使用 JIRA CPU 验证风险分析 Skill，分析我上传的 JIRA CSV，输出验证 leader 视角的风险报告。
+```
+
+```text
+请分析这些 JIRA bug，判断 tapeout 前还有哪些验证风险没有释放。
+```
+
+```text
+请按模块统计 JIRA 缺陷，并给出 Top 风险模块和下周收敛建议。
+```
+
+```text
+请把这个 JIRA 查询结果整理成 CPU 项目验证周报。
+```
+
+```text
+请基于 JIRA 数据检查当前 milestone 是否具备退出条件。
+```
+
